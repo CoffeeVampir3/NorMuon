@@ -96,13 +96,14 @@ class Muon(torch.optim.Optimizer):
         return loss
 
 def normuon_update(grad, momentum, v_buffer, beta1=0.95, beta2=0.95, eps=1e-10, ns_steps=5):
+    """Optimized NorMuon update with minimal intermediates."""
     momentum.lerp_(grad, 1 - beta1)
 
     orth_update = zeropower_via_newtonschulz5(momentum, steps=ns_steps)
     m, n = orth_update.shape
 
     per_neuron_sq = orth_update.norm(dim=-1).pow(2).div(n)
-    v_buffer.lerp_(per_neuron_sq, 1 - beta2)
+    v_buffer.lerp_(per_neuron_sq.to(v_buffer.dtype), 1 - beta2)
 
     orth_update.mul_((v_buffer + eps).unsqueeze(-1).rsqrt())
 
