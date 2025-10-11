@@ -2,6 +2,11 @@
 
 Tentative implementation of NorMuon from https://arxiv.org/abs/2510.05491
 
+Currently only implemented as single device:
+```
+SingleDeviceNorMuonWithAuxAdam(param_groups)
+```
+
 Original Muon implementation by:
 ## Citation
 
