@@ -96,17 +96,36 @@ class Muon(torch.optim.Optimizer):
         return loss
 
 def normuon_update(grad, momentum, v_buffer, beta1=0.95, beta2=0.95, eps=1e-10, ns_steps=5):
-    """Optimized NorMuon update with minimal intermediates."""
-    momentum.lerp_(grad, 1 - beta1)
+    """
+    https://arxiv.org/abs/2510.05491
+    Args:
+        grad: [m, n]
+        momentum: First-order momentum buffer [m, n]
+        v_buffer: Second-order per-neuron momentum buffer [m]
+        beta1: First-order momentum decay coefficient ~.95
+        beta2: Second-order momentum decay coefficient ~.95
+        eps: Small constant for numerical stability
+        ns_steps: Number of Newton-Schulz iterations for orthogonalization
 
+    Returns:
+        update: The normalized, orthogonalized update tensor [m, n]
+    """
+
+    # First order momentum (Regular muon)
+    momentum.lerp_(grad, 1 - beta1)
+    # Orthogonalize
     orth_update = zeropower_via_newtonschulz5(momentum, steps=ns_steps)
     m, n = orth_update.shape
 
+    # Per neuron squared L2 norm
     per_neuron_sq = orth_update.norm(dim=-1).pow(2).div(n)
     v_buffer.lerp_(per_neuron_sq.to(v_buffer.dtype), 1 - beta2)
 
+    # Normalize by second order
+    # k/sqrt(x) -> k * rsqrt(x)
     orth_update.mul_((v_buffer + eps).unsqueeze(-1).rsqrt())
 
+    # Scale factor recommended by the paper
     scale = 0.2 * (m * n) ** 0.5 / (orth_update.norm() + 1e-7)
     orth_update.mul_(scale)
 
