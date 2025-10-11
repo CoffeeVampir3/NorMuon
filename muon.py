@@ -25,7 +25,7 @@ def zeropower_via_newtonschulz5(G, steps: int):
         A = X @ X.mT
         B = b * A + c * A @ A # quintic computation strategy adapted from suggestion by @jxbz, @leloykun, and @YouJiacheng
         X = a * X + B @ X
-    
+
     if G.size(-2) > G.size(-1):
         X = X.mT
     return X
@@ -95,6 +95,58 @@ class Muon(torch.optim.Optimizer):
 
         return loss
 
+def normuon_update(grad, momentum, v_buffer, beta1=0.95, beta2=0.95, eps=1e-10, ns_steps=5):
+    momentum.lerp_(grad, 1 - beta1)
+
+    orth_update = zeropower_via_newtonschulz5(momentum, steps=ns_steps)
+    m, n = orth_update.shape
+
+    per_neuron_sq = orth_update.norm(dim=-1).pow(2).div(n)
+    v_buffer.lerp_(per_neuron_sq, 1 - beta2)
+
+    orth_update.mul_((v_buffer + eps).unsqueeze(-1).rsqrt())
+
+    scale = 0.2 * (m * n) ** 0.5 / (orth_update.norm() + 1e-7)
+    orth_update.mul_(scale)
+
+    return orth_update
+
+class SingleDeviceNorMuon(torch.optim.Optimizer):
+    def __init__(self, params, lr=0.02, weight_decay=0, momentum=0.95, beta2=0.95, eps=1e-10):
+        defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum, beta2=beta2, eps=eps)
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+
+                state = self.state[p]
+
+                if len(state) == 0:
+                    state["momentum_buffer"] = torch.zeros_like(p)
+                    state["v_buffer"] = torch.zeros(p.shape[0], device=p.device, dtype=p.dtype)
+
+                update = normuon_update(
+                    p.grad,
+                    state["momentum_buffer"],
+                    state["v_buffer"],
+                    beta1=group["momentum"],
+                    beta2=group["beta2"],
+                    eps=group["eps"]
+                )
+
+                p.mul_(1 - group["lr"] * group["weight_decay"])
+                p.add_(update, alpha=-group["lr"])
+
+        return loss
 
 class SingleDeviceMuon(torch.optim.Optimizer):
     """
