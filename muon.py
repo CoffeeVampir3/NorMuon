@@ -316,6 +316,19 @@ class SingleDeviceNorMuonWithAuxAdam(torch.optim.Optimizer):
                 assert set(group.keys()) == set(["params", "lr", "betas", "eps", "weight_decay", "use_muon"])
         super().__init__(param_groups, dict())
 
+    def preallocate_state(self):
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p not in self.state:
+                    state = self.state[p]
+                    if group["use_muon"]:
+                        state["momentum_buffer"] = torch.zeros_like(p)
+                        state["v_buffer"] = torch.zeros(p.shape[0], device=p.device, dtype=p.dtype)
+                    else:
+                        state["exp_avg"] = torch.zeros_like(p)
+                        state["exp_avg_sq"] = torch.zeros_like(p)
+                        state["step"] = 0
+
     @torch.no_grad()
     def step(self, closure=None):
         loss = None
